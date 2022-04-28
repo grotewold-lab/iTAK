@@ -215,7 +215,8 @@ USAGE:  perl $0 [options] input_seq
 		my %align_pfam_hash = aln_to_hash($hmmscan_detail_1, \%ga_cutoff);
 
 		# ==== A2. TF identification ====
-		my %qid_tid = itak_tf_identify($hmmscan_hit_1, $hmmscan_detail_1, $hmmscan_hit_1b, \%ga_cutoff, \%tf_rule);
+		my $output_all_matches	  = "$output_dir/tf_all_matches.txt";
+		my %qid_tid = itak_tf_identify($hmmscan_hit_1, $hmmscan_detail_1, $hmmscan_hit_1b, \%ga_cutoff, \%tf_rule, $output_all_matches);
 		$report_info.= "  ".scalar(keys(%qid_tid))." of proteins were identified as transcription factors or transcriptional regulators\n";
 
 		# ==== A3. save the result ====
@@ -524,7 +525,7 @@ NiLldekgelkiaDFGlakkl..eksseklttlvgtreYmAPEvllkakeytkkvDvWslGvilyelltgklpfsgesee
 =cut
 sub itak_tf_identify 
 {
-	my ($hmmscan_hit, $hmmscan_detail, $hmmscan_hit_b, $ga_cutoff, $tf_rule) = @_;
+	my ($hmmscan_hit, $hmmscan_detail, $hmmscan_hit_b, $ga_cutoff, $tf_rule, $output_all_matches) = @_;
 
 	chomp($hmmscan_hit);
 	chomp($hmmscan_detail);
@@ -586,6 +587,9 @@ sub itak_tf_identify
 		}
 	}
 
+    # prepare to report all transcript-family matches
+    open(all_matches_FH, '>', $output_all_matches ) or die $!;
+
 	# compare query_hits with rules, 
 	foreach my $qid (sort keys %query_hits_all)
 	{
@@ -598,9 +602,12 @@ sub itak_tf_identify
 		$score_s	= $query_hits_s{$qid}{'score'} if defined $query_hits_s{$qid}{'score'};
 
 		# print "$qid\t$hits\n";
-		my $rule_id = compare_rule($hits, $score, $hits_s, $score_s, $tf_rule);
+		my $rule_id = compare_rule($hits, $score, $hits_s, $score_s, $tf_rule, $qid, \*all_matches_FH);
 		$qid_tid{$qid} = $rule_id if $rule_id ne 'NA';
 	}
+    
+    # stop writing report
+    close(all_matches_FH);
 
 	return %qid_tid;
 }
@@ -611,7 +618,7 @@ sub itak_tf_identify
 =cut
 sub compare_rule
 {
-	my ($hmm_hit, $hmm_score, $hmm_hit_s, $hmm_score_s, $rule_pack) = @_;
+	my ($hmm_hit, $hmm_score, $hmm_hit_s, $hmm_score_s, $rule_pack, $qid, $all_matches_FH) = @_;
 	
 	my %rule = %$rule_pack; # unpack the rule
 
@@ -663,6 +670,8 @@ sub compare_rule
 			$r_status = 1 if $match_status == 2;
 			
 			if ($match_status == 2 || $match_status_b == 2) {
+                my $tname = $rule{$rid}{'name'};
+                print {$all_matches_FH} "$qid\t$tname\n";
 				# print "$rid\t$domain_num\t$match_score\n";
 
 				# specific assign rules for orphans
