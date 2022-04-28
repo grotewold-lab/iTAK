@@ -19,6 +19,7 @@
 	[Dec-14-2010][v1.0]: first stable version 
 =cut
 
+
 use strict;
 use warnings;
 use Cwd;
@@ -29,6 +30,15 @@ use Bio::SeqIO;
 use FindBin;
 use lib "$FindBin::RealBin/bin";
 use itak;
+
+
+# debug
+unlink("iTAK_rules_report.txt");
+unlink("iTAK_cutoffs_report.txt");
+unlink("iTAK_parsed_hmmscan_output.txt");
+unlink("iTAK_ignored_hmmscan_hits.txt");
+unlink("iTAK_identification_report.txt");
+unlink("iTAK_all_matched_families.txt");
 
 my $version = 1.6;
 my $debug = 0;
@@ -155,6 +165,13 @@ USAGE:  perl $0 [options] input_seq
 	%ga_cutoff = load_ga_cutoff($pfam_db, $correct_ga, $sfam_db) if $mode eq 'normal';
 	%ga_cutoff = load_ga_cutoff($tfam_db, $correct_ga, $sfam_db) if $mode eq 'quick';
 	my $pkid_des = pk_to_hash($pk_desc);
+    
+    #debug
+    open(FH, '>>', "iTAK_cutoffs_report.txt") or die $!;
+    while (my ($key, $value) = each(%ga_cutoff)) {
+        print FH "$key -> $value\n";
+    }
+    close(FH);
 
 	# +++++ main +++++ 
 	foreach my $f (@$files)
@@ -223,6 +240,14 @@ USAGE:  perl $0 [options] input_seq
 		# ==== A2. TF identification ====
 		my %qid_tid = itak_tf_identify($hmmscan_hit_1, $hmmscan_detail_1, $hmmscan_hit_1b, \%ga_cutoff, \%tf_rule);
 		$report_info.= "  ".scalar(keys(%qid_tid))." of proteins were identified as transcription factors or transcriptional regulators\n";
+        
+        # debug
+        open(FH, '>>', "iTAK_identification_report.txt") or die $!;
+        while (my ($key, $value) = each(%qid_tid)) {
+            print FH "$key -> $value\n";
+        }
+        close(FH);
+        
 
 		# ==== A3. save the result ====
 		my $output_sequence	  = "$output_dir/tf_sequence.fasta";
@@ -255,9 +280,9 @@ USAGE:  perl $0 [options] input_seq
         	print $report_info."\n";
 
 			# remove temp folder
-			unless ($debug) {
-            	run_cmd("rm -rf $temp_dir") if -s $temp_dir;
-			}
+			#unless ($debug) {
+            #	run_cmd("rm -rf $temp_dir") if -s $temp_dir;
+			#}
 
 			# for online version
 			if (defined $$options{'z'}) { run_cmd("tar -czf $output_dir.tgz $output_dir"); }
@@ -414,9 +439,9 @@ USAGE:  perl $0 [options] input_seq
 		print $report_info."\n";
 
 		# remove temp folder
-		unless ($debug) {
-			run_cmd("rm -rf $temp_dir") if -s $temp_dir;
-		}
+		#unless ($debug) {
+		#	run_cmd("rm -rf $temp_dir") if -s $temp_dir;
+		#}
 
 		# for online version
 		if (defined $$options{'z'}) { run_cmd("tar -czf $output_dir.tgz $output_dir"); }
@@ -457,9 +482,9 @@ sub load_rule
 			die "[ERR]undef rule member $id\n" unless($id && $name && $family && $required && $auxiiary && $forbidden && $type && $desc);
 			$rule_obj{$id}{'name'} = $name;
 			$rule_obj{$id}{'family'} = $family;
-			$rule_obj{$id}{'required'}  = parse_domain_rule($required);
-			$rule_obj{$id}{'auxiiary'}  = parse_domain_rule($auxiiary);
-			$rule_obj{$id}{'forbidden'} = parse_domain_rule($forbidden);
+			$rule_obj{$id}{'required'}  = parse_domain_rule($required, "required for $name");
+			$rule_obj{$id}{'auxiiary'}  = parse_domain_rule($auxiiary, "auxiliary for $name");
+			$rule_obj{$id}{'forbidden'} = parse_domain_rule($forbidden, "forbidden for $name");
 			$rule_obj{$id}{'type'} = $type;	
 			$rule_obj{$id}{'desc'} = $desc;
 			($id, $name, $family, $required, $auxiiary, $forbidden, $type, $desc) = ('', ''. '', '', '', '', '', '');
@@ -512,6 +537,7 @@ sub load_rule
 sub parse_domain_rule 
 {
 	my $domain_rule = shift;
+    my $report_label = shift;
 
 	return $domain_rule if $domain_rule eq 'NA';
 
@@ -567,6 +593,15 @@ sub parse_domain_rule
 			$domain_combination{$com} = 1;
 		}
 	}
+    
+    #debug
+    open(FH, '>>', "iTAK_rules_report.txt") or die $!;
+    print FH "\n$report_label:\n";
+    while (my ($key, $value) = each(%domain_combination)) {
+        print FH "\t$key -> $value\n";
+    }
+    close(FH);
+    
 	return \%domain_combination;
 }
 
@@ -735,7 +770,21 @@ sub itak_tf_identify
 		($query_id, $pfam_id, $score, $evalue) = @b;
 		$pfam_id =~ s/\..*// if $pfam_id =~ m/^PF/;
 		die "[ERR]undef GA score for $pfam_id\n" unless defined $$ga_cutoff{$pfam_id};
-		next if $score < $$ga_cutoff{$pfam_id};
+		if( $score < $$ga_cutoff{$pfam_id} ){
+            
+            # debug
+            open(FH, '>>', "iTAK_ignored_hmmscan_hits.txt") or die $!;
+            print FH "\nignored low-scoring hmmscan relation:\n";
+            print FH "\tfrom hsp part of hmmscan hit\n";
+            print FH "\tquery_id: $query_id\n";
+            print FH "\thmm_id: $pfam_id\n";
+            print FH "\tscore: $score\n";
+            print FH "\tevalue: $evalue\n";
+            print FH "\tscore cutoff: $$ga_cutoff{$pfam_id}\n";
+            close(FH);
+            
+            next;
+        }
 
 		if (defined $query_hits{$b[0]}) {
 			$query_hits{$b[0]}{'pid'}.="\t".$pfam_id;
@@ -759,8 +808,21 @@ sub itak_tf_identify
 		($query_id, $pfam_id, $score, $evalue) = @d;
 		$pfam_id =~ s/\..*// if $pfam_id =~ m/^PF/;
 		die "[ERR]undef GA score for $pfam_id\n" unless defined $$ga_cutoff{$pfam_id};
-		next if $score < $$ga_cutoff{$pfam_id};
-
+		if( $score < $$ga_cutoff{$pfam_id} ){
+            
+            # debug
+            open(FH, '>>', "iTAK_ignored_hmmscan_hits.txt") or die $!;
+            print FH "\nignored low-scoring hmmscan relation:\n";
+            print FH "\tfrom head part of hmmscan hit\n";
+            print FH "\tquery_id: $query_id\n";
+            print FH "\thmm_id: $pfam_id\n";
+            print FH "\tscore: $score\n";
+            print FH "\tevalue: $evalue\n";
+            print FH "\tscore cutoff: $$ga_cutoff{$pfam_id}\n";
+            close(FH);
+            
+            next;
+        }
 		if (defined $query_hits{$d[0]}) {
 			$query_hits_s{$d[0]}{'pid'}.="\t".$pfam_id;
 			$query_hits_s{$d[0]}{'score'}.="\t".$score;
@@ -783,7 +845,7 @@ sub itak_tf_identify
 		$score_s	= $query_hits_s{$qid}{'score'} if defined $query_hits_s{$qid}{'score'};
 
 		# print "$qid\t$hits\n";
-		my $rule_id = compare_rule($hits, $score, $hits_s, $score_s, $tf_rule);
+		my $rule_id = compare_rule($hits, $score, $hits_s, $score_s, $tf_rule, $qid);
 		$qid_tid{$qid} = $rule_id if $rule_id ne 'NA';
 	}
 
@@ -796,7 +858,7 @@ sub itak_tf_identify
 =cut
 sub compare_rule
 {
-	my ($hmm_hit, $hmm_score, $hmm_hit_s, $hmm_score_s, $rule_pack) = @_;
+	my ($hmm_hit, $hmm_score, $hmm_hit_s, $hmm_score_s, $rule_pack, $qid) = @_;
 	
 	my %rule = %$rule_pack; # unpack the rule
 
@@ -841,13 +903,21 @@ sub compare_rule
 
 			# define several families need compare in sequence level
 			my ($match_status_b, $match_score_b) = (0, 0);
-			if ($rid eq 'T0008' || $rid eq 'T0008' || $rid eq 'T0011' || $rid eq 'T0023') {
-				($match_status_b, $match_score_b) = compare_array(\@hits_s, \@score_s, \@r);
-			}
+			#if ($rid eq 'T0008' || $rid eq 'T0008' || $rid eq 'T0011' || $rid eq 'T0023') {
+			#	($match_status_b, $match_score_b) = compare_array(\@hits_s, \@score_s, \@r);
+			#}
 			my $domain_num = scalar(@r);
 			$r_status = 1 if $match_status == 2;
 			
+			if ($match_status == 1 || $match_status_b == 1) {
+                print "\tfound partial match: $qid -> $rid\n";
+            }
 			if ($match_status == 2 || $match_status_b == 2) {
+            
+                #debug
+                open(FH, '>>', "iTAK_all_matched_families.txt") or die $!;
+                print FH "$qid\t$rid\n";
+                close(FH);
 				# print "$rid\t$domain_num\t$match_score\n";
 
 				# specific assign rules for orphans
